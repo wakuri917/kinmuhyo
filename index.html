@@ -7,9 +7,12 @@
         body { font-family: "Helvetica Neue", Arial, sans-serif; padding: 20px; background: #f4f7f6; }
         .container { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .nav-area { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .title-area { display: flex; align-items: center; gap: 15px; }
         h1 { font-size: 20px; color: #2c3e50; margin: 0; }
         button { padding: 8px 16px; cursor: pointer; background: #2c3e50; color: #fff; border: none; border-radius: 4px; }
         button:hover { background: #34495e; }
+        #switch-btn { background-color: #e67e22; }
+        #switch-btn:hover { background-color: #d35400; }
         .table-responsive { overflow-x: auto; max-height: 80vh; }
         table { border-collapse: collapse; width: 100%; user-select: none; }
         th, td { border: 1px solid #e0e0e0; padding: 4px; text-align: center; vertical-align: middle; min-width: 50px; }
@@ -33,7 +36,10 @@
 <div class="container">
     <div class="nav-area">
         <button onclick="changeMonth(-1)">← 前月</button>
-        <h1 id="month-title"></h1>
+        <div class="title-area">
+            <h1 id="month-title"></h1>
+            <button id="switch-btn" onclick="window.location.href='https://kintai-shimzolc.netlify.app/'">勤怠管理に切替</button>
+        </div>
         <label>休日設定(日): <input type="text" id="extra-holidays" style="width:80px; padding:4px;" onchange="saveHolidays(); renderTable();" placeholder="例: 10,20"></label>
         <label style="font-size: 14px; cursor: pointer;">
             <input type="checkbox" id="edit-mode-toggle" onchange="toggleEditMode()"> 編集モード
@@ -116,7 +122,6 @@
         data = newData;
         localStorage.setItem(storageKey, JSON.stringify(data));
         
-        // 翌月以降すべてのページを同期
         let m = currentMonth;
         let y = currentYear;
         while (true) {
@@ -126,7 +131,7 @@
             if (localStorage.getItem(nextKey)) {
                 syncStructure(nextKey);
             } else {
-                break; // データが存在しない月になったら終了
+                break;
             }
         }
         alert("編集を確定し、以降のすべての月に反映しました。");
