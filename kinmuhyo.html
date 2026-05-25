@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>月間勤務計画表</title>
+    <style>
+        body { font-family: "Helvetica Neue", Arial, sans-serif; padding: 20px; background: #f4f7f6; }
+        .container { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav-area { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        h1 { font-size: 20px; color: #2c3e50; margin: 0; }
+        button { padding: 8px 16px; cursor: pointer; background: #2c3e50; color: #fff; border: none; border-radius: 4px; }
+        button:hover { background: #34495e; }
+        .table-responsive { overflow-x: auto; max-height: 80vh; }
+        table { border-collapse: collapse; width: 100%; user-select: none; }
+        th, td { border: 1px solid #e0e0e0; padding: 4px; text-align: center; vertical-align: middle; min-width: 50px; }
+        th { position: sticky; top: 0; z-index: 10; background-color: #ffffff; }
+        .sat-th { background-color: #e3f2fd !important; color: #2980b9; }
+        .sun-hol-th { background-color: #fff3e0 !important; color: #e74c3c; }
+        .name-col { position: sticky; left: 0; background: #f9f9f9; z-index: 5; font-weight: bold; text-align: left; min-width: 160px; }
+        .comment-row { background-color: #95a5a6 !important; color: #ffffff !important; font-weight: bold; }
+        .comment-row td { text-align: left !important; padding-left: 10px !important; }
+        select { width: 100%; border: none; background: transparent; text-align: center; cursor: pointer; -webkit-appearance: none; appearance: none; font-size: 11px; }
+        .btn-sm { padding: 2px 5px; font-size: 10px; margin-left: 2px; background-color: #bdc3c7; color: #fff; border: none; border-radius: 3px; cursor: pointer; }
+        .btn-sm:hover { background-color: #95a5a6; }
+        .edit-mode-off .btn-sm { display: none; }
+        .selected { outline: 2px solid #3498db !important; background-color: #d1e7dd !important; }
+
+        /* 印刷用スタイル */
+        @media print {
+            .nav-area, .btn-sm, #edit-mode-toggle, label[for="edit-mode-toggle"] { display: none !important; }
+            body { background: #fff; padding: 0; }
+            .container { box-shadow: none; padding: 0; }
+            .table-responsive { overflow: visible; max-height: none; }
+            table { font-size: 10px; }
+            th, td { padding: 2px; border: 1px solid #ccc; }
+            .name-col { min-width: 100px; }
+            select { font-size: 10px; pointer-events: none; }
+            th, td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body class="edit-mode-off">
+
+<div class="container">
+    <div class="nav-area">
+        <button onclick="changeMonth(-1)">← 前月</button>
+        <h1 id="month-title"></h1>
+        <label>休日設定(日): <input type="text" id="extra-holidays" style="width:80px; padding:4px;" onchange="saveHolidays(); renderTable();" placeholder="例: 10,20"></label>
+        <label style="font-size: 14px; cursor: pointer;">
+            <input type="checkbox" id="edit-mode-toggle" onchange="toggleEditMode()"> 編集モード
+        </label>
+        <button onclick="changeMonth(1)">翌月 →</button>
+    </div>
+    <div class="table-responsive">
+        <table id="schedule-table">
+            <thead><tr id="header-row"></tr></thead>
+            <tbody id="table-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentYear = parseInt(urlParams.get('year')) || new Date().getFullYear();
+    const currentMonth = parseInt(urlParams.get('month')) || new Date().getMonth() + 1;
+    const lastDay = new Date(currentYear, currentMonth, 0).getDate();
+    const storageKey = `schedule_${currentYear}_${currentMonth}`;
+    const holidayKey = `holidays_${currentYear}_${currentMonth}`;
+    
+    let isDragging = false;
+    let selectedCells = [];
+    let clipboardData = [];
+
+    document.getElementById('extra-holidays').value = localStorage.getItem(holidayKey) || "";
+
+    let data = JSON.parse(localStorage.getItem(storageKey)) || [
+        { type: 'comment', text: '浦安OLC土木2026' },
+        "虫明 和宏", "兼重 拓也", "石川 知哉",
+        { type: 'comment', text: 'TDS浮きドック改修' },
+        "吉田 美幸", "和栗 岳成", "宮﨑 弘敬", "西本 敏子",
+        { type: 'comment', text: 'TDL受水槽更新' },
+        "大阿久 則幸", "三上 一正",
+        { type: 'comment', text: 'TDL　SP更新工事' },
+        "佐藤 良平", "横沢 篤", "榊枝 勝", "松田 昂大", "濱田 育実", "ｸﾞｪﾝ ﾌｰﾝ", "古川 祐輔", "川瀬 晴輝", "本木 晃", "飯田 康大", "佐々木 優人", "高橋 佳剛", "関野 亜由美", "成田 勇"
+    ];
+
+    const options = ["", "出", "夜勤", "明休", "休", "AM休", "PM休", "研修", "出張", "健康診断", "人間ドック", "スライド", "在宅", "組合活動", "現場見学"];
+
+    function toggleEditMode() {
+        const isChecked = document.getElementById('edit-mode-toggle').checked;
+        if (isChecked) document.body.classList.remove('edit-mode-off');
+        else document.body.classList.add('edit-mode-off');
+    }
+
+    function saveHolidays() {
+        localStorage.setItem(holidayKey, document.getElementById('extra-holidays').value);
+    }
+
+    function clearSelection() {
+        selectedCells.forEach(td => td.classList.remove('selected'));
+        selectedCells = [];
+    }
+
+    function getDayColor(dayIndex, dayNum) {
+        const extraHolidays = document.getElementById('extra-holidays').value.split(',').map(d => parseInt(d.trim()));
+        if (dayIndex === 0 || extraHolidays.includes(dayNum)) return "#fff3e0";
+        if (dayIndex === 6) return "#e3f2fd";
+        return "transparent";
+    }
+
+    function updateCellColor(selectElement, dayIndex, dayNum) {
+        const val = selectElement.value;
+        const td = selectElement.parentElement;
+        td.style.backgroundColor = getDayColor(dayIndex, dayNum);
+        if (val === "夜勤") td.style.backgroundColor = "#D9E1F2";
+        else if (["休", "明休", "AM休", "PM休"].includes(val)) td.style.backgroundColor = "#FFFF00";
+    }
+
+    function saveData() {
+        const rows = document.querySelectorAll('#table-body tr');
+        const newData = [];
+        rows.forEach((tr) => {
+            if (tr.classList.contains('comment-row')) {
+                newData.push({ type: 'comment', text: tr.querySelector('input').value });
+            } else {
+                const selects = tr.querySelectorAll('select');
+                newData.push({ name: tr.querySelector('input').value, schedule: Array.from(selects).map(s => s.value) });
+            }
+        });
+        data = newData;
+        localStorage.setItem(storageKey, JSON.stringify(data));
+    }
+
+    function initHeader() {
+        const headerRow = document.getElementById('header-row');
+        headerRow.innerHTML = '<th class="name-header">氏名</th>';
+        const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
+        for (let i = 1; i <= lastDay; i++) {
+            const date = new Date(currentYear, currentMonth - 1, i);
+            const dayIndex = date.getDay();
+            const th = document.createElement('th');
+            if (getDayColor(dayIndex, i) === "#fff3e0") th.className = 'sun-hol-th';
+            else if (dayIndex === 6) th.className = 'sat-th';
+            th.innerHTML = `${i}<br><small>${weekDays[dayIndex]}</small>`;
+            headerRow.appendChild(th);
+        }
+    }
+
+    function renderTable() {
+        initHeader();
+        const tbody = document.getElementById('table-body');
+        tbody.innerHTML = '';
+        data.forEach((item, index) => {
+            const tr = document.createElement('tr');
+            if (item.type === 'comment') {
+                tr.className = 'comment-row';
+                tr.innerHTML = `<td colspan="${lastDay + 1}">
+                    <input type="text" value="${item.text}" oninput="saveData()" style="background:transparent; border:none; color:white; font-weight:bold; width:200px;">
+                    <button class="btn-sm" onclick="addComment(${index})">+C</button>
+                    <button class="btn-sm" onclick="deleteItem(${index})">-</button>
+                    <button class="btn-sm" onclick="moveItem(${index}, -1)">↑</button>
+                    <button class="btn-sm" onclick="moveItem(${index}, 1)">↓</button>
+                </td>`;
+            } else {
+                const name = item.name || item;
+                const schedule = item.schedule || Array(lastDay).fill("");
+                tr.innerHTML = `<td class="name-col">
+                    <input type="text" value="${name}" oninput="saveData()" style="width:80px; border:none; background:transparent; font-weight:bold;">
+                    <button class="btn-sm" onclick="addRow(${index})">+</button>
+                    <button class="btn-sm" onclick="deleteItem(${index})">-</button>
+                    <button class="btn-sm" onclick="moveItem(${index}, -1)">↑</button>
+                    <button class="btn-sm" onclick="moveItem(${index}, 1)">↓</button>
+                </td>`;
+                for (let i = 0; i < lastDay; i++) {
+                    const dayNum = i + 1;
+                    const dayIndex = new Date(currentYear, currentMonth - 1, dayNum).getDay();
+                    const td = document.createElement('td');
+                    const select = document.createElement('select');
+                    
+                    td.onmousedown = (e) => { isDragging = true; clearSelection(); td.classList.add('selected'); selectedCells.push(td); };
+                    td.onmouseover = (e) => { if (isDragging && !selectedCells.includes(td)) { td.classList.add('selected'); selectedCells.push(td); } };
+                    
+                    select.onchange = function() { updateCellColor(this, dayIndex, dayNum); saveData(); };
+                    options.forEach(opt => {
+                        const option = document.createElement('option');
+                        option.value = opt; option.textContent = opt;
+                        if (schedule[i] === opt) option.selected = true;
+                        select.appendChild(option);
+                    });
+                    td.appendChild(select);
+                    tr.appendChild(td);
+                    updateCellColor(select, dayIndex, dayNum);
+                }
+            }
+            tbody.appendChild(tr);
+        });
+    }
+
+    window.onmouseup = () => { isDragging = false; };
+
+    document.addEventListener('keydown', function(e) {
+        if (selectedCells.length === 0) return;
+        const sorted = selectedCells.sort((a, b) => a.parentElement.rowIndex - b.parentElement.rowIndex || a.cellIndex - b.cellIndex);
+        
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+            const minRow = sorted[0].parentElement.rowIndex;
+            const minCol = sorted[0].cellIndex;
+            const rows = {};
+            sorted.forEach(td => {
+                const r = td.parentElement.rowIndex - minRow;
+                const c = td.cellIndex - minCol;
+                if (!rows[r]) rows[r] = [];
+                rows[r][c] = td.querySelector('select').value;
+            });
+            clipboardData = Object.values(rows);
+        } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+            if (clipboardData.length === 0) return;
+            const tbody = document.getElementById('table-body');
+            const startRowIndex = sorted[0].parentElement.rowIndex - 1;
+            const startColIndex = sorted[0].cellIndex;
+
+            clipboardData.forEach((rowData, r) => {
+                rowData.forEach((val, c) => {
+                    const targetRow = tbody.rows[startRowIndex + r];
+                    if (targetRow) {
+                        const targetTd = targetRow.cells[startColIndex + c];
+                        const select = targetTd ? targetTd.querySelector('select') : null;
+                        if (select) {
+                            select.value = val;
+                            const dayNum = (startColIndex + c);
+                            const dayIndex = new Date(currentYear, currentMonth - 1, dayNum).getDay();
+                            updateCellColor(select, dayIndex, dayNum);
+                        }
+                    }
+                });
+            });
+            saveData();
+        }
+    });
+
+    function addRow(index) { saveData(); data.splice(index + 1, 0, "新規氏名"); renderTable(); }
+    function addComment(index) { saveData(); data.splice(index + 1, 0, { type: 'comment', text: '新規コメント' }); renderTable(); }
+    function deleteItem(index) { if (confirm("削除しますか？")) { data.splice(index, 1); localStorage.setItem(storageKey, JSON.stringify(data)); renderTable(); } }
+    function moveItem(index, direction) {
+        saveData();
+        const newIndex = index + direction;
+        if (newIndex >= 0 && newIndex < data.length) {
+            const temp = data[index]; data[index] = data[newIndex]; data[newIndex] = temp;
+            renderTable();
+        }
+    }
+
+    function changeMonth(offset) {
+        saveData();
+        let newMonth = currentMonth + offset;
+        let newYear = currentYear;
+        if (newMonth > 12) { newMonth = 1; newYear++; }
+        else if (newMonth < 1) { newMonth = 12; newYear--; }
+        window.location.href = `?year=${newYear}&month=${newMonth}`;
+    }
+
+    document.getElementById('month-title').textContent = `${currentYear}年${currentMonth}月 勤務計画表`;
+    renderTable();
+</script>
+</body>
+</html>
